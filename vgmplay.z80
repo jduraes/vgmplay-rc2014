@@ -1,0 +1,143 @@
+MUSIC EQU 0x1000
+
+	ORG 0xF00
+
+	LD HL,MUSIC + 0x80 ; FIXME detect VGM version and header size
+	LD IX,0
+	LD B,0xFE
+
+LOOP:
+	LD A,(HL) ; GET COMMAND
+
+	CP 0x5A ; OPL2 register write
+	JP Z,SendRegPage1
+
+	;CP 0x5B ; OPL1 register write - does not work, how much of it is compatible with OPL2?
+	;JP Z,SendRegPage1
+
+	CP 0x5E ; OPL3 page 1 register write
+	JP Z,SendRegPage1
+
+	CP 0x5F ; OPL3 page 2 register write
+	JP Z,SendRegPage2
+
+	CP 0x61 ; Custom delay
+	JP Z,Delay
+
+	CP 0x62 ; 1 frame (60Hz) delay
+	JP Z,DelayFrame50
+
+	CP 0x63 ; 1 frame (50Hz) delay
+	JP Z,DelayFrame50
+
+	CP 0x66 ; End of stream
+	RET Z
+
+	CP 0x70
+	JR C,unknown
+
+	CP 0x80
+	JR C,DelayShort
+
+unknown:
+	; Dump all unknown command
+	CALL 0xBB5A
+NEXT:
+	INC HL
+	JP LOOP
+
+SendRegPage1:
+	INC HL
+	LD D,(HL)
+	INC HL
+	LD E,(HL)
+
+	LD C, &BC
+	OUT (C),D
+
+	INC C
+	OUT (C),E
+
+	JP NEXT
+
+SendRegPage2:
+	INC HL
+	LD D,(HL)
+	INC HL
+	LD E,(HL)
+
+	LD C, &BE
+	OUT (C),D
+
+	DEC C
+	OUT (C),E
+
+	JP NEXT
+
+DelayShort
+	SUB 0x6F
+	LD D,0
+	LD E,A
+	JR Do_Delay
+
+DelayFrame60:
+	LD DE,0x02DF
+	JR Do_Delay
+
+DelayFrame50:
+	LD DE,0x0372
+	JR Do_Delay
+
+Delay:
+	INC HL
+	LD E,(HL)
+	INC HL
+	LD D,(HL)
+
+Do_Delay:
+	PUSH BC
+
+	LD BC,&7F10
+	OUT (C),C
+	LD C,&40 + 20
+	OUT (C),C
+
+	; Add the residue from the previous wait
+	ADD IX,DE
+	PUSH IX
+	POP DE
+
+	; Put the delay duration into HL
+	EX DE,HL
+
+	; Load into BC the duration in 44100Hz cycles of a HALT
+	LD BC, 882
+	;LD BC, 147
+
+haltloop:
+	CCF
+	SBC HL,BC
+	JR C,done
+
+	CALL &BD19
+	HALT
+	HALT
+	JR haltloop
+
+done:
+	ADD HL,BC
+	PUSH HL
+	POP IX
+
+	; Store the residue into IX
+	; FIXME instead of this, maybe we can do a tight loop here?
+	EX DE,HL
+
+	LD BC,&7F10
+	OUT (C),C
+	LD C,&40 +25
+	OUT (C),C
+
+	POP BC
+
+	JP NEXT
