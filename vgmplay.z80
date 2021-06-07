@@ -12,8 +12,8 @@ LOOP:
 	CP 0x5A ; OPL2 register write
 	JP Z,SendRegPage1
 
-	;CP 0x5B ; OPL1 register write - does not work, how much of it is compatible with OPL2?
-	;JP Z,SendRegPage1
+	CP 0x5B ; OPL1 register write
+	JP Z,SendRegPage1
 
 	CP 0x5E ; OPL3 page 1 register write
 	JP Z,SendRegPage1
@@ -33,6 +33,10 @@ LOOP:
 	CP 0x66 ; End of stream
 	RET Z
 
+	CP 0xA0
+	JR Z,WriteAY
+
+	; Short delays (70 to 7F for delay of 1 to 16 cycles)
 	CP 0x70
 	JR C,unknown
 
@@ -74,7 +78,19 @@ SendRegPage2:
 
 	JP NEXT
 
-DelayShort
+WriteAY:
+	PUSH BC
+
+	INC HL
+	LD A,(HL)
+	INC HL
+	LD C,(HL)
+	CALL &BD34
+
+	POP BC
+	JP NEXT
+
+DelayShort:
 	SUB 0x6F
 	LD D,0
 	LD E,A
@@ -125,12 +141,13 @@ haltloop:
 	JR haltloop
 
 done:
+	; Store the residue into IX
+	; FIXME instead of this, maybe we can do a tight loop here?
 	ADD HL,BC
 	PUSH HL
 	POP IX
 
-	; Store the residue into IX
-	; FIXME instead of this, maybe we can do a tight loop here?
+	; Restore data pointer in HL
 	EX DE,HL
 
 	LD BC,&7F10
