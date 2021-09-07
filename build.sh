@@ -1,2 +1,3 @@
-vasmz80_oldstyle vgmplay.z80 -Fbin
-hideur a.out -o PLAYVGM.BIN -x "&F00" -l "&F00"
+rasm PLAYVGM.ASM -amper -o PLAYVGM
+hideur PLAYVGM.bin -o PLAYVGM.COD -t 2 -x 0x9000 -l 0x9000
+

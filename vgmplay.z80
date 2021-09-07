@@ -1,160 +1,526 @@
-MUSIC EQU 0x1000
+;
+; VGM Player for Amstrad CPC
+; (c) 2021 by PulkoMandy
+; Enhancements by OffseT and Zik
+;
+; Required:
+;   - VGM files must be uncompressed
+;   - Willy+OPL3LPT (for OPL musics)
+;   - UniDOS 1.35+ (for file streaming)
 
-	ORG 0xF00
+; When activated rasters flashing in border indicate activity:
+; - Blue, CPU is busy (handling VGM and playing music)
+; - Red, data are being read from disk (filling buffer)
+; - Green, CPU is free (waiting to synchronize music)
+Let _UseRaster = 1
 
-	LD HL,MUSIC + 0x80 ; FIXME detect VGM version and header size
-	LD IX,0
-	LD B,0xFE
+; BufLen represents the maximum amount of data read at once from disk
+; &40 is the minimum (this is the size of VGM root header)
+; Maximum depends on ORG used (the buffer area is located after the player)
+BufLen:
+    Equ &80
 
-LOOP:
-	LD A,(HL) ; GET COMMAND
+;
+; Play code starts here
+;
 
-	CP 0x5A ; OPL2 register write
-	JP Z,SendRegPage1
+    Org &9000
 
-	CP 0x5B ; OPL1 register write
-	JP Z,SendRegPage1
+    ; File name given?
+    cp 1
+    ret nz
 
-	CP 0x5E ; OPL3 page 1 register write
-	JP Z,SendRegPage1
+    call CheckUniDOS
+    ret nc
 
-	CP 0x5F ; OPL3 page 2 register write
-	JP Z,SendRegPage2
+    ; Abandon any already opened file
+    call &bc7d
 
-	CP 0x61 ; Custom delay
-	JP Z,Delay
+    ; Get the provided file name
+    ld l,(ix+0)
+    ld h,(ix+1)
+    ld b,(hl)
+    inc hl
+    ld a,(hl)
+    inc hl
+    ld h,(hl)
+    ld l,a
 
-	CP 0x62 ; 1 frame (60Hz) delay
-	JP Z,DelayFrame50
+    ; Open the provided file; if a directory name
+    ; was provided, we will automagically change
+    ; the current directory and then return
+    ; Note: DE input of CAS IN OPEN is not used
+    ; when loading is done through UniDOS CTRL-J
+    ; BIOS commands
+    call &bc77
+    ret nc
 
-	CP 0x63 ; 1 frame (50Hz) delay
-	JP Z,DelayFrame50
+    ; Remove frame flyback color cycling event block
+    ld hl,&b7f9
+    call &bcdd
 
-	CP 0x66 ; End of stream
-	RET Z
+    call ReadBuffer
+    jp nz,Exit
 
-	CP 0xA0
-	JR Z,WriteAY
+    ; Check for "Vgm" identifier
+    ld iy,(BufCur)
+    ld a,"V":cp (iy+0):ret nz
+    ld a,"g":cp (iy+1):ret nz
+    ld a,"m":cp (iy+2):ret nz
 
-	; Short delays (70 to 7F for delay of 1 to 16 cycles)
-	CP 0x70
-	JR C,unknown
+    ; Compute the actual music start from
+    ; the stream data offset
 
-	CP 0x80
-	JR C,DelayShort
+    ; Get stream start
+    ld bc,&34
+    call ReadHeaderOffsetField
+    ; Start stream offset set?
+    jr nz,SetMusicStart
+DefaultMusicStart:
+    ld l,&c
+SetMusicStart:
+    adc hl,bc
+    jr nc,SetMusicStartNC
+    inc de
+SetMusicStartNC:
+    ld (MusicStart+0),hl
+    ld (MusicStart+2),de
 
-unknown:
-	; Dump all unknown command
-	CALL 0xBB5A
-NEXT:
-	INC HL
-	JP LOOP
+    ; Compute the actual music loop from either
+    ; the loop offset or the music start
+    ld bc,&1c
+    call ReadHeaderOffsetField
+    ; Music loop offset set?
+    jr nz,SetMusicLoop
+DefaultMusicLoop:
+    ld hl,(MusicStart+0)
+    ld de,(MusicStart+2)
+    jr SetMusicLoopNC
+SetMusicLoop:
+    adc hl,bc
+    jr nc,SetMusicLoopNC
+    inc de
+SetMusicLoopNC:
+    ld (MusicLoop+0),hl
+    ld (MusicLoop+2),de
 
-SendRegPage1:
-	INC HL
-	LD D,(HL)
-	INC HL
-	LD E,(HL)
+    ; Just begin at start of music
+    ld hl,(MusicStart+0)
+    ld de,(MusicStart+2)
+    jr Start
 
-	LD C, &BC
-	OUT (C),D
+Restart:
+    ; Loop to stream start
+    ld hl,(MusicLoop+0)
+    ld de,(MusicLoop+2)
+Start:
+    call CAS_IN_SEEK
+    jp nz,Exit
 
-	INC C
-	OUT (C),E
+    call ReadBuffer
+    jp nz,Exit
 
-	JP NEXT
+    ; Reset system time as we use it
+    ; to adjust the player timings
+    ld bc,0
+    ld (&b8b4),bc ; Reset time
 
-SendRegPage2:
-	INC HL
-	LD D,(HL)
-	INC HL
-	LD E,(HL)
+Loop:
+    ; Exit on keypress
+    call &bb1b
+    jp c,Exit
 
-	LD C, &BE
-	OUT (C),D
+    ; Read the command id
+    call GetByte
+    jp nc,Exit
 
-	DEC C
-	OUT (C),E
+    ; OPL2 register
+    cp &5a ;
+    jr z,SendRegOPLPage1
 
-	JP NEXT
+    ; OPL1 register
+    cp &5b
+    jr z,SendRegOPLPage1
 
-WriteAY:
-	PUSH BC
+    ; OPL3 page 1 register
+    cp &5e
+    jr z,SendRegOPLPage1
 
-	INC HL
-	LD A,(HL)
-	INC HL
-	LD C,(HL)
-	CALL &BD34
+    ; OPL3 page 2 register
+    cp &5f
+    jr z,SendRegOPLPage2
 
-	POP BC
-	JP NEXT
+    ; Custom delay
+    cp &61
+    jr z,DelayCustom
+
+    ; One 60Hz frame delay
+    cp &62
+    jr z,DelayFrame60
+
+    ; One 50Hz frame delay
+    cp &63
+    jr z,DelayFrame50
+
+    ; End of stream
+    cp &66
+    jr z,Restart
+
+    ; AY register
+    cp &a0
+    jr z,SendRegAY
+
+    ; Short delays (70 to 7F for delay of 1 to 16 cycles)
+    cp &70
+    jr c,Unknown
+
+    cp &80
+    jr c,DelayShort
+
+Unknown:
+    ; Dump all unknown command
+    call &bb5a
+
+    jr Loop
+
+SendRegOPLPage1:
+    call GetByte
+    jp nc,Exit
+    ld d,a
+
+    call GetByte
+    jp nc,Exit
+    ld e,a
+
+    ld bc,&febc
+    out (c),d
+    inc c
+    out (c),e
+
+    jr Loop
+
+SendRegOPLPage2:
+    call GetByte
+    jp nc,Exit
+    ld d,a
+
+    call GetByte
+    jp nc,Exit
+    ld e,a
+
+    ld bc,&febe
+    out (c),d
+    dec c
+    out (c),e
+
+    jr Loop
+
+SendRegAY:
+    call GetByte
+    jp nc,Exit
+    ld d,a
+
+    call GetByte
+    jp nc,Exit
+    ld e,a
+
+    ld a,d
+    ld c,e
+    call &bd34
+
+    jp Loop
 
 DelayShort:
-	SUB 0x6F
-	LD D,0
-	LD E,A
-	JR Do_Delay
+    sub &6f
+    LD d,0
+    LD e,A
+    jr DoDelay
 
 DelayFrame60:
-	LD DE,0x02DF
-	JR Do_Delay
+    ld de,&02df
+    jr DoDelay
 
 DelayFrame50:
-	LD DE,0x0372
-	JR Do_Delay
+    ld de,&0372
+    jr DoDelay
 
-Delay:
-	INC HL
-	LD E,(HL)
-	INC HL
-	LD D,(HL)
+DelayCustom:
+    call GetByte
+    jp nc,Exit
+    ld e,a
 
-Do_Delay:
-	PUSH BC
+    call GetByte
+    jp nc,Exit
+    ld d,a
 
-	LD BC,&7F10
-	OUT (C),C
-	LD C,&40 + 20
-	OUT (C),C
+DoDelay:
+    ; Get timer count
+    ld hl,(&b8b4)
 
-	; Add the residue from the previous wait
-	ADD IX,DE
-	PUSH IX
-	POP DE
+    ; Convert to 44100Hz ticks...
+    call MulHL_147
 
-	; Put the delay duration into HL
-	EX DE,HL
+    ; Determine if the delay is larger than
+    ; the already elapsed time or not
+    push de
+    ex de,hl
+    or a
+    sbc hl,de
+    pop de
+    jp c,SkipDelay
 
-	; Load into BC the duration in 44100Hz cycles of a HALT
-	LD BC, 882
-	;LD BC, 147
+If _UseRaster
+    ld a,&40+18
+    call SetRaster
+EndIf
 
-haltloop:
-	CCF
-	SBC HL,BC
-	JR C,done
+    ; Convert the 44100Hz ticks (sic) into microseconds
+DelayLoop:
+    ld a,h
+    or l
+    jr z,Done
 
-	CALL &BD19
-	HALT
-	HALT
-	JR haltloop
+    dec hl
 
-done:
-	; Store the residue into IX
-	; FIXME instead of this, maybe we can do a tight loop here?
-	ADD HL,BC
-	PUSH HL
-	POP IX
+    ex (sp),hl
+    ex (sp),hl
 
-	; Restore data pointer in HL
-	EX DE,HL
+    jr DelayLoop
 
-	LD BC,&7F10
-	OUT (C),C
-	LD C,&40 +25
-	OUT (C),C
+Done:
+If _UseRaster
+    ld a,&40+21
+    call SetRaster
+EndIf
 
-	POP BC
+    ; Reset system time
+    ld bc,0
+    ld (&b8b4),bc
 
-	JP NEXT
+    jp Loop
+
+SkipDelay:
+    ; Skip time fix if delay is too small
+    ld a,d
+    or a
+    jr nz,FixTime
+    ld a,e
+    cp 147
+    jp c,loop
+    ; Decrement elapsed time by one only
+    ld hl,(&b8b4)
+    dec hl
+    ld (&b8b4),hl
+    jp loop
+FixTime:
+    ex de,hl
+    ld c,147
+    call DivHL_C
+    ; Fix elapsed time
+    ex de,hl
+    ld hl,(&b8b4)
+    or a
+    sbc hl,de
+    ld (&b8b4),hl
+    jp loop
+
+Exit:
+    ; Close file
+    call &bc7a
+    ; Reset PSG
+    call &bca7
+    ; Reset OPL
+    call OPL3Reset
+    ; Restore frame flyback color cycling event block
+    ld hl,&b7f9
+    call &bcda
+
+    ret
+
+OPL3Reset:
+    call OPL3ResetPage2
+    call OPL3ResetPage1
+    ret
+
+OPL3ResetPage1:
+    ld bc,&febc
+    ld a,255
+OPL3ResetLoop1:
+    out (c),a
+    inc c
+    out (c),0
+    dec c
+    dec a
+    jr nz,OPL3ResetLoop1
+    ret
+
+OPL3ResetPage2:
+    ld bc,&febe
+    ld a,255
+OPL3ResetLoop2:
+    out (c),a
+    dec c
+    out (c),0
+    inc c
+    dec a
+    jr nz,OPL3ResetLoop2
+    ret
+
+GetByte:
+    ld bc,(BufLeft)
+    ld a,c
+    or b
+    jr z,GetNewBuffer
+
+    ld hl,(BufCur)
+    ld a,(hl)
+
+    inc hl
+    ld (BufCur),hl
+    dec bc
+    ld (BufLeft),bc
+
+    scf
+    ret
+
+GetNewBuffer:
+    call ReadBuffer
+    jr z,GetByte
+    cp a ; NC
+    ret
+
+ReadBuffer:
+    push de
+
+If _UseRaster
+    ld a,&40+12
+    call SetRaster
+EndIf
+
+    ld hl,Buffer
+    ld de,BufLen
+    call CAS_IN_READ
+    ld (BufLeft),de
+    ld (BufCur),hl
+
+If _UseRaster
+    ld a,&40+21
+    call SetRaster
+EndIf
+    pop de
+    ret
+
+If _UseRaster
+SetRaster:
+    di
+    ld bc,&7f10
+    out (c),c
+    out (c),a
+    ei
+    ret
+EndIf
+
+; In : BC=offset position
+; Out: Z if offset not set (Carry=0 always)
+ReadHeaderOffsetField
+    ld iy,(BufCur)
+    add iy,bc
+    ld l,(iy+0)
+    ld h,(iy+1)
+    ld e,(iy+2)
+    ld d,(iy+3)
+    ; Offset set?
+    ld a,l
+    or h
+    or e
+    or d ; NC
+    ret
+
+; Multiplcation: HL=HLx147
+MulHL_147
+    push de
+    push hl
+    add hl,hl
+    ld e,l
+    ld d,h
+    add hl,hl
+    add hl,hl
+    add hl,hl
+    ld c,l
+    ld b,h
+    add hl,hl
+    add hl,hl
+    add hl,hl
+    add hl,bc
+    add hl,de
+    pop bc
+    add hl,bc ; x 147
+    pop de
+    ret
+
+; Division: HL=HL/C
+DivHL_C:
+    xor a
+    ld b,16
+DivLoop:
+    add hl,hl
+    rla
+    jr c,$+5
+    cp c
+    jr c,$+4
+    sub c
+    inc l
+    djnz DivLoop
+    ret
+
+CheckUniDOS:
+    ; Find RSX CTRL-J UniDOS BIOS entry
+    ld hl,CTRL_J
+    call &bcd4
+    ret nc
+    ; Initialze UniDOS BIOS vector
+    ld (FarCall+0),hl
+    ld a,c
+    ld (FarCall+2),a
+    ret
+
+CTRL_J:
+    db &8a    ; Ctrl J
+
+CAS_IN_SEEK:
+    ld c,6
+    call BIOS
+    ret c
+    jr UnsupportedCommand
+
+CAS_IN_READ:
+    ld c,5
+    call BIOS
+    ret c
+    jr UnsupportedCommand
+
+UnsupportedCommand:
+    ld a,16     ; Return "bad command" error + NZ
+    or a
+    ret
+
+BIOS:
+    rst &18
+    dw FarCall
+    ret
+
+FarCall:
+    ds 2 ; Address
+    ds 1 ; ROM
+
+MusicStart
+    ds 4
+MusicLoop
+    ds 4
+
+BufLeft
+    ds 2
+BufCur
+    ds 2
+Buffer
+;    ds BufLen
