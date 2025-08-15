@@ -4,7 +4,11 @@ A player for VGM files ported to the RC2014 Z80 computer.
 
 **This is a port of the original VGM player for Amstrad CPC to work with RC2014 systems.**
 
-Original project: https://framagit.org/shinra/vgmplay
+## Credits
+
+**Original Authors**: Shinra team - PulkoMandy, OffseT and Zik  
+**Original Project**: https://framagit.org/shinra/vgmplay  
+**RC2014 Port**: jduraes
 
 ## RC2014 Port Status
 
