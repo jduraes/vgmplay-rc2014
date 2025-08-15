@@ -1,0 +1,437 @@
+# file opened: vgmplay-rc2014.z80
+  1   0000              ;
+  2   0000              ; VGM Player for RC2014 Z80 Computer
+  3   0000              ; Port of the original Amstrad CPC VGM Player
+  4   0000              ;
+  5   0000              ; Original Authors: Shinra team - PulkoMandy, OffseT and Zik
+  6   0000              ; Original Project: https://framagit.org/shinra/vgmplay
+  7   0000              ; RC2014 Port: jduraes
+  8   0000              ;
+  9   0000              ; Required:
+ 10   0000              ;   - VGM files must be uncompressed
+ 11   0000              ;   - OPL3 sound card (suggested I/O ports: 0x60-0x61 for page 1, 0x62-0x63 for page 2)
+ 12   0000              ;   - AY-3-8912 sound card (suggested I/O port: 0xA0 for register, 0xA1 for data)
+ 13   0000              ;   - CP/M 2.2 or compatible
+ 14   0000              ;
+ 15   0000              ; RC2014 I/O Port Assignments (suggestions):
+ 16   0000              ; 0x60 - OPL3 Page 1 Register Port
+ 17   0000              ; 0x61 - OPL3 Page 1 Data Port
+ 18   0000              ; 0x62 - OPL3 Page 2 Register Port
+ 19   0000              ; 0x63 - OPL3 Page 2 Data Port
+ 20   0000              ; 0xA0 - AY Register Select Port
+ 21   0000              ; 0xA1 - AY Data Port
+ 22   0000              ;
+ 23   0000              ; These ports are chosen to avoid conflicts with common RC2014 peripherals:
+ 24   0000              ; - Serial: 0x80-0x87 (SIO)
+ 25   0000              ; - CF Card: 0x10-0x17
+ 26   0000              ; - RTC: 0x70-0x73
+ 27   0000              ; - Digital I/O: 0x00-0x07
+ 28   0000              ; - Memory banking: 0x78-0x7B
+ 29   0000
+ 30   0000              ; I/O Port definitions
+ 31   0000              OPL3_PAGE1_REG  EQU 0x60
+ 32   0000              OPL3_PAGE1_DATA EQU 0x61
+ 33   0000              OPL3_PAGE2_REG  EQU 0x62
+ 34   0000              OPL3_PAGE2_DATA EQU 0x63
+ 35   0000              AY_REG_PORT     EQU 0xA0
+ 36   0000              AY_DATA_PORT    EQU 0xA1
+ 37   0000
+ 38   0000              ; CP/M BDOS function calls
+ 39   0000              BDOS_CONIN      EQU 1   ; Console input
+ 40   0000              BDOS_CONOUT     EQU 2   ; Console output
+ 41   0000              BDOS_PSTRING    EQU 9   ; Print string
+ 42   0000              BDOS_CONSTAT    EQU 11  ; Console status
+ 43   0000              BDOS_OPEN       EQU 15  ; Open file
+ 44   0000              BDOS_CLOSE      EQU 16  ; Close file
+ 45   0000              BDOS_READ       EQU 20  ; Read sequential
+ 46   0000              BDOS_SETDMA     EQU 26  ; Set DMA address
+ 47   0000
+ 48   0000              ; CP/M system addresses
+ 49   0000              BDOS_ENTRY      EQU 0x0005
+ 50   0000              TPA_START       EQU 0x0100
+ 51   0000              DEFAULT_FCB     EQU 0x005C
+ 52   0000              DEFAULT_DMA     EQU 0x0080
+ 53   0000
+ 54   0000              ; Buffer size - smaller than original for CP/M memory constraints
+ 55   0000              BufLen          EQU 128
+ 56   0000
+ 57   0000              ; CP/M .COM file starts at 0x0100
+ 58   0000                              ORG TPA_START
+ 59   0100
+ 60   0100              ; CP/M entry point
+ 61   0100              Start:
+ 62   0100                  ; Check if filename was provided in default FCB
+ 63   0100 3A 5D 00         ld a,(DEFAULT_FCB+1)
+ 64   0103 FE 20            cp ' '              ; Space means no filename
+ 65   0105 CA 9B 02         jp z,ShowUsage
+ 66   0108
+ 67   0108                  ; Set up our own DMA buffer
+ 68   0108 11 1D 03         ld de,DMABuffer
+ 69   010B 0E 1A            ld c,BDOS_SETDMA
+ 70   010D CD 05 00         call BDOS_ENTRY
+ 71   0110
+ 72   0110                  ; Open the VGM file
+ 73   0110 CD 6E 02         call OpenVGMFile
+ 74   0113 C2 B1 02         jp nz,Exit
+ 75   0116
+ 76   0116                  ; Read and verify VGM header
+ 77   0116 CD 3C 02         call ReadBuffer
+ 78   0119 C2 B1 02         jp nz,Exit
+ 79   011C
+ 80   011C                  ; Check for "Vgm" identifier
+ 81   011C 21 1D 03         ld hl,DMABuffer
+ 82   011F 22 19 03         ld (BufCur),hl
+ 83   0122 01 80 00         ld bc,BufLen
+ 84   0125 ED 43 17 03      ld (BufLeft),bc
+ 85   0129
+ 86   0129 3E 56            ld a,'V'
+ 87   012B BE               cp (hl)
+ 88   012C C2 A6 02         jp nz,BadFile
+ 89   012F 23               inc hl
+ 90   0130 3E 67            ld a,'g'
+ 91   0132 BE               cp (hl)
+ 92   0133 C2 A6 02         jp nz,BadFile
+ 93   0136 23               inc hl
+ 94   0137 3E 6D            ld a,'m'
+ 95   0139 BE               cp (hl)
+ 96   013A C2 A6 02         jp nz,BadFile
+ 97   013D
+ 98   013D                  ; Parse VGM header - simplified version
+ 99   013D                  ; Skip to data start (offset 0x34 in header, but we'll use fixed offset 0x40)
+100   013D 21 5D 03         ld hl,DMABuffer+0x40
+101   0140 22 13 03         ld (MusicStart),hl
+102   0143 22 15 03         ld (MusicLoop),hl     ; For simplicity, loop = start
+103   0146
+104   0146                  ; Initialize timing
+105   0146 AF               xor a
+106   0147 32 1B 03         ld (TimerLo),a
+107   014A 32 1C 03         ld (TimerHi),a
+108   014D
+109   014D                  ; Reset sound chips
+110   014D CD 4B 02         call ResetOPL3
+111   0150 CD 60 02         call ResetAY
+112   0153
+113   0153                  ; Main playback loop
+114   0153              MainLoop:
+115   0153                  ; Check for keypress (ESC to exit)
+116   0153 0E 0B            ld c,BDOS_CONSTAT
+117   0155 CD 05 00         call BDOS_ENTRY
+118   0158 B7               or a
+119   0159 28 0A            jr z,NoKey
+120   015B
+121   015B                  ; Get the key
+122   015B 0E 01            ld c,BDOS_CONIN
+123   015D CD 05 00         call BDOS_ENTRY
+124   0160 FE 1B            cp 27               ; ESC key
+125   0162 CA B1 02         jp z,Exit
+126   0165
+127   0165              NoKey:
+128   0165                  ; Get next VGM command
+129   0165 CD 1E 02         call GetByte
+130   0168 D2 B1 02         jp nc,Exit          ; End of data
+131   016B
+132   016B                  ; Process VGM commands
+133   016B FE 5A            cp 0x5A             ; OPL2 register
+134   016D 28 2F            jr z,SendRegOPLPage1
+135   016F
+136   016F FE 5B            cp 0x5B             ; OPL1 register
+137   0171 28 2B            jr z,SendRegOPLPage1
+138   0173
+139   0173 FE 5E            cp 0x5E             ; OPL3 page 1 register
+140   0175 28 27            jr z,SendRegOPLPage1
+141   0177
+142   0177 FE 5F            cp 0x5F             ; OPL3 page 2 register
+143   0179 28 3A            jr z,SendRegOPLPage2
+144   017B
+145   017B FE 61            cp 0x61             ; Custom delay
+146   017D 28 75            jr z,DelayCustom
+147   017F
+148   017F FE 62            cp 0x62             ; 1/60s delay
+149   0181 28 67            jr z,DelayFrame60
+150   0183
+151   0183 FE 63            cp 0x63             ; 1/50s delay
+152   0185 28 68            jr z,DelayFrame50
+153   0187
+154   0187 FE 66            cp 0x66             ; End of stream
+155   0189 CA 0E 02         jp z,RestartLoop
+156   018C
+157   018C FE A0            cp 0xA0             ; AY register
+158   018E 28 3C            jr z,SendRegAY
+159   0190
+160   0190                  ; Short delays (0x70-0x7F)
+161   0190 FE 70            cp 0x70
+162   0192 38 04            jr c,Unknown
+163   0194 FE 80            cp 0x80
+164   0196 38 4B            jr c,DelayShort
+165   0198
+166   0198              Unknown:
+167   0198                  ; Print unknown command as hex
+168   0198 CD 79 02         call PrintHex
+169   019B C3 53 01         jp MainLoop
+170   019E
+171   019E              SendRegOPLPage1:
+172   019E CD 1E 02         call GetByte
+173   01A1 D2 B1 02         jp nc,Exit
+174   01A4 57               ld d,a              ; Register
+175   01A5
+176   01A5 CD 1E 02         call GetByte
+177   01A8 D2 B1 02         jp nc,Exit
+178   01AB 5F               ld e,a              ; Data
+179   01AC
+180   01AC                  ; Send to OPL3 Page 1
+181   01AC 7A               ld a,d
+182   01AD D3 60            out (OPL3_PAGE1_REG),a
+183   01AF 7B               ld a,e
+184   01B0 D3 61            out (OPL3_PAGE1_DATA),a
+185   01B2
+186   01B2 C3 53 01         jp MainLoop
+187   01B5
+188   01B5              SendRegOPLPage2:
+189   01B5 CD 1E 02         call GetByte
+190   01B8 D2 B1 02         jp nc,Exit
+191   01BB 57               ld d,a              ; Register
+192   01BC
+193   01BC CD 1E 02         call GetByte
+194   01BF D2 B1 02         jp nc,Exit
+195   01C2 5F               ld e,a              ; Data
+196   01C3
+197   01C3                  ; Send to OPL3 Page 2
+198   01C3 7A               ld a,d
+199   01C4 D3 62            out (OPL3_PAGE2_REG),a
+200   01C6 7B               ld a,e
+201   01C7 D3 63            out (OPL3_PAGE2_DATA),a
+202   01C9
+203   01C9 C3 53 01         jp MainLoop
+204   01CC
+205   01CC              SendRegAY:
+206   01CC CD 1E 02         call GetByte
+207   01CF D2 B1 02         jp nc,Exit
+208   01D2 57               ld d,a              ; Register
+209   01D3
+210   01D3 CD 1E 02         call GetByte
+211   01D6 D2 B1 02         jp nc,Exit
+212   01D9 5F               ld e,a              ; Data
+213   01DA
+214   01DA                  ; Send to AY-3-8912
+215   01DA 7A               ld a,d
+216   01DB D3 A0            out (AY_REG_PORT),a
+217   01DD 7B               ld a,e
+218   01DE D3 A1            out (AY_DATA_PORT),a
+219   01E0
+220   01E0 C3 53 01         jp MainLoop
+221   01E3
+222   01E3              DelayShort:
+223   01E3 D6 6F            sub 0x6F            ; Convert to delay value (1-16)
+224   01E5 5F               ld e,a
+225   01E6 16 00            ld d,0
+226   01E8 18 18            jr DoDelay
+227   01EA
+228   01EA              DelayFrame60:
+229   01EA 11 DF 02         ld de,735           ; 44100/60 = 735 samples
+230   01ED 18 13            jr DoDelay
+231   01EF
+232   01EF              DelayFrame50:
+233   01EF 11 72 03         ld de,882           ; 44100/50 = 882 samples
+234   01F2 18 0E            jr DoDelay
+235   01F4
+236   01F4              DelayCustom:
+237   01F4 CD 1E 02         call GetByte
+238   01F7 D2 B1 02         jp nc,Exit
+239   01FA 5F               ld e,a
+240   01FB
+241   01FB CD 1E 02         call GetByte
+242   01FE D2 B1 02         jp nc,Exit
+243   0201 57               ld d,a
+244   0202
+245   0202              DoDelay:
+246   0202                  ; Simple delay implementation - just loop
+247   0202                  ; In a real implementation, this should be tied to system timing
+248   0202              DelayLoop:
+249   0202 7A               ld a,d
+250   0203 B3               or e
+251   0204 CA 53 01         jp z,MainLoop
+252   0207 1B               dec de
+253   0208
+254   0208                  ; Small CPU delay
+255   0208 00               nop
+256   0209 00               nop
+257   020A 00               nop
+258   020B 00               nop
+259   020C
+260   020C 18 F4            jr DelayLoop
+261   020E
+262   020E              RestartLoop:
+263   020E                  ; Reset to beginning (simplified)
+264   020E 2A 15 03         ld hl,(MusicLoop)
+265   0211 22 19 03         ld (BufCur),hl
+266   0214 01 80 00         ld bc,BufLen
+267   0217 ED 43 17 03      ld (BufLeft),bc
+268   021B C3 53 01         jp MainLoop
+269   021E
+270   021E              ; Get next byte from buffer
+271   021E              GetByte:
+272   021E ED 4B 17 03      ld bc,(BufLeft)
+273   0222 78               ld a,b
+274   0223 B1               or c
+275   0224 28 0F            jr z,GetNewBuffer
+276   0226
+277   0226 2A 19 03         ld hl,(BufCur)
+278   0229 7E               ld a,(hl)
+279   022A 23               inc hl
+280   022B 22 19 03         ld (BufCur),hl
+281   022E 0B               dec bc
+282   022F ED 43 17 03      ld (BufLeft),bc
+283   0233
+284   0233 37               scf                 ; Success
+285   0234 C9               ret
+286   0235
+287   0235              GetNewBuffer:
+288   0235 CD 3C 02         call ReadBuffer
+289   0238 28 E4            jr z,GetByte
+290   023A B7               or a                ; Clear carry - no more data
+291   023B C9               ret
+292   023C
+293   023C              ; Read buffer from file
+294   023C              ReadBuffer:
+295   023C                  ; For CP/M, we need to implement proper file I/O
+296   023C                  ; This is simplified - in real implementation should handle EOF properly
+297   023C 01 80 00         ld bc,BufLen
+298   023F ED 43 17 03      ld (BufLeft),bc
+299   0243 21 1D 03         ld hl,DMABuffer
+300   0246 22 19 03         ld (BufCur),hl
+301   0249 AF               xor a               ; Return success
+302   024A C9               ret
+303   024B
+304   024B              ; Reset OPL3 chip
+305   024B              ResetOPL3:
+306   024B                  ; Reset all OPL3 registers to 0
+307   024B 06 FF            ld b,0xFF
+308   024D              ResetOPL3Loop1:
+309   024D 78               ld a,b
+310   024E D3 60            out (OPL3_PAGE1_REG),a
+311   0250 AF               xor a
+312   0251 D3 61            out (OPL3_PAGE1_DATA),a
+313   0253 10 F8            djnz ResetOPL3Loop1
+314   0255
+315   0255 06 FF            ld b,0xFF
+316   0257              ResetOPL3Loop2:
+317   0257 78               ld a,b
+318   0258 D3 62            out (OPL3_PAGE2_REG),a
+319   025A AF               xor a
+320   025B D3 63            out (OPL3_PAGE2_DATA),a
+321   025D 10 F8            djnz ResetOPL3Loop2
+322   025F C9               ret
+323   0260
+324   0260              ; Reset AY chip
+325   0260              ResetAY:
+326   0260 06 10            ld b,16             ; 16 AY registers (0-15)
+327   0262 0E 00            ld c,0
+328   0264              ResetAYLoop:
+329   0264 79               ld a,c
+330   0265 D3 A0            out (AY_REG_PORT),a
+331   0267 AF               xor a
+332   0268 D3 A1            out (AY_DATA_PORT),a
+333   026A 0C               inc c
+334   026B 10 F7            djnz ResetAYLoop
+335   026D C9               ret
+336   026E
+337   026E              ; Open VGM file using CP/M
+338   026E              OpenVGMFile:
+339   026E 11 5C 00         ld de,DEFAULT_FCB
+340   0271 0E 0F            ld c,BDOS_OPEN
+341   0273 CD 05 00         call BDOS_ENTRY
+342   0276 FE FF            cp 0xFF             ; 0xFF = file not found
+343   0278 C9               ret
+344   0279
+345   0279              ; Print hex value in A
+346   0279              PrintHex:
+347   0279 F5               push af
+348   027A 1F               rra
+349   027B 1F               rra
+350   027C 1F               rra
+351   027D 1F               rra
+352   027E E6 0F            and 0x0F
+353   0280 CD 8A 02         call PrintHexNibble
+354   0283 F1               pop af
+355   0284 E6 0F            and 0x0F
+356   0286 CD 8A 02         call PrintHexNibble
+357   0289 C9               ret
+358   028A
+359   028A              PrintHexNibble:
+360   028A FE 0A            cp 10
+361   028C 38 04            jr c,PrintDigit
+362   028E C6 37            add 'A'-10
+363   0290 18 02            jr PrintChar
+364   0292              PrintDigit:
+365   0292 C6 30            add '0'
+366   0294              PrintChar:
+367   0294 5F               ld e,a
+368   0295 0E 02            ld c,BDOS_CONOUT
+369   0297 CD 05 00         call BDOS_ENTRY
+370   029A C9               ret
+371   029B
+372   029B              ShowUsage:
+373   029B 11 C0 02         ld de,UsageMsg
+374   029E 0E 09            ld c,BDOS_PSTRING
+375   02A0 CD 05 00         call BDOS_ENTRY
+376   02A3 C3 B1 02         jp Exit
+377   02A6
+378   02A6              BadFile:
+379   02A6 11 F5 02         ld de,BadFileMsg
+380   02A9 0E 09            ld c,BDOS_PSTRING
+381   02AB CD 05 00         call BDOS_ENTRY
+382   02AE C3 B1 02         jp Exit
+383   02B1
+384   02B1              Exit:
+385   02B1                  ; Reset sound chips
+386   02B1 CD 4B 02         call ResetOPL3
+387   02B4 CD 60 02         call ResetAY
+388   02B7
+389   02B7                  ; Close file
+390   02B7 11 5C 00         ld de,DEFAULT_FCB
+391   02BA 0E 10            ld c,BDOS_CLOSE
+392   02BC CD 05 00         call BDOS_ENTRY
+393   02BF
+394   02BF                  ; Return to CP/M
+395   02BF C9               ret
+396   02C0
+397   02C0              ; Messages
+398   02C0              UsageMsg:
+399   02C0 56 47 4D 20      db 'VGM Player for RC2014',13,10
+399   02C4 50 6C 61 79
+399   02C8 65 72 20 66
+399   02CC 6F 72 20 52
+399   02D0 43 32 30 31
+399   02D4 34 0D 0A
+400   02D7 55 73 61 67      db 'Usage: VGMPLAY filename.vgm',13,10
+400   02DB 65 3A 20 56
+400   02DF 47 4D 50 4C
+400   02E3 41 59 20 66
+400   02E7 69 6C 65 6E
+400   02EB 61 6D 65 2E
+400   02EF 76 67 6D 0D
+400   02F3 0A
+401   02F4 24               db '$'
+402   02F5
+403   02F5              BadFileMsg:
+404   02F5 45 72 72 6F      db 'Error: Not a valid VGM file',13,10,'$'
+404   02F9 72 3A 20 4E
+404   02FD 6F 74 20 61
+404   0301 20 76 61 6C
+404   0305 69 64 20 56
+404   0309 47 4D 20 66
+404   030D 69 6C 65 0D
+404   0311 0A 24
+405   0313
+406   0313              ; Variables
+407   0313 00 00        MusicStart:     dw 0
+408   0315 00 00        MusicLoop:      dw 0
+409   0317 00 00        BufLeft:        dw 0
+410   0319 00 00        BufCur:         dw 0
+411   031B 00           TimerLo:        db 0
+412   031C 00           TimerHi:        db 0
+413   031D
+414   031D              ; DMA buffer for file I/O
+415   031D 00 00 00...  DMABuffer:      ds BufLen
+416   039D
+# file closed: vgmplay-rc2014.z80
