@@ -8,7 +8,7 @@ A player for VGM files ported to the RC2014 Z80 computer.
 
 **Original Authors**: Shinra team - PulkoMandy, OffseT and Zik  
 **Original Project**: https://framagit.org/shinra/vgmplay  
-**RC2014 Port**: jduraes
+**RC2014 Port**: electrified, jduraes
 
 ## RC2014 Port Status
 
