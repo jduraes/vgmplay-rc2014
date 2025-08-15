@@ -1,4 +1,16 @@
-A player for VGM files for Amstrad CPC with Willy interface.
+# VGM Player for RC2014 Z80 Computer
+
+A player for VGM files ported to the RC2014 Z80 computer.
+
+**This is a port of the original VGM player for Amstrad CPC to work with RC2014 systems.**
+
+Original project: https://framagit.org/shinra/vgmplay
+
+## RC2014 Port Status
+
+🚧 **Work in Progress** - This is currently being ported from the original Amstrad CPC version to work with RC2014 systems.
+
+## Original Description
 
 This can play OPL1, OPL2 and OPL3 musics (YM3256, YM3812, YMF262) through the
 OPL3LPT. It can also play AY music.
@@ -42,6 +54,8 @@ Unsupported commands in the VGM data are printed as ASCII chars. If something
 is printed and the music is not sounding correctly, probably your file uses
 not implemented commands.
 
+## Supported VGM Commands
+
 The following commands are available:
 
 - 5A - Write to OPL2 register
@@ -55,6 +69,8 @@ The following commands are available:
 - 70 to 7F - Short variable delay
 - A0 - Write to AY3 register
 
+## Technical Notes
+
 The player uses CALLs BD19 (for synchronization), BB5A (for printing unknown
 commands), and BD34 (write to AY). It also changes the border color to show
 CPU load, and uses HALTs to position itself somewhere in the middle of the
@@ -63,3 +79,10 @@ display. This is all easily replaced or removed.
 The player uses registers HL (song pointer), BC (pointer to OPL3), and IY
 (time delay residue accumulator). These can easily be replaced by variables
 or reloaded as needed instead to have something easier to mix with other code.
+
+## RC2014 Adaptations Needed
+
+- [ ] Adapt CPC-specific BIOS calls to CP/M or RC2014 monitor calls
+- [ ] Update I/O port addresses for RC2014 sound cards
+- [ ] Modify timing routines for RC2014 interrupt system
+- [ ] Test with RC2014 OPL3 and AY sound cards
