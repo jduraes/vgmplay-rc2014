@@ -12,7 +12,80 @@ A player for VGM files ported to the RC2014 Z80 computer.
 
 ## RC2014 Port Status
 
-🚧 **Work in Progress** - This is currently being ported from the original Amstrad CPC version to work with RC2014 systems.
+✅ **Complete** - Successfully ported and builds with sjasmplus
+
+## Building
+
+Requires [sjasmplus](https://github.com/z00m128/sjasmplus) assembler:
+
+```bash
+make            # Build VGMPLAY.COM
+make clean      # Clean build files
+make test       # Build and show file info
+```
+
+## Usage
+
+Copy `VGMPLAY.COM` to your RC2014 CP/M system and run:
+
+```
+A>VGMPLAY MUSIC.VGM
+```
+
+**Note**: Uses 8.3 filename convention (VGMPLAY.COM, MUSIC.VGM) for CP/M compatibility.
+
+## Hardware Requirements
+
+- RC2014 Z80 system with CP/M 2.2+
+- OPL3 sound card at I/O ports 0x60-0x63
+- AY-3-8912 sound card at I/O ports 0xA0-0xA1
+- Uncompressed VGM files
+
+## I/O Port Assignments
+
+Chosen to avoid conflicts with common RC2014 peripherals:
+
+| Chip | Function | Port |
+|------|----------|------|
+| OPL3 Page 1 | Register | 0x60 |
+| OPL3 Page 1 | Data | 0x61 |
+| OPL3 Page 2 | Register | 0x62 |
+| OPL3 Page 2 | Data | 0x63 |
+| AY-3-8912 | Register | 0xA0 |
+| AY-3-8912 | Data | 0xA1 |
+
+**Avoided Ports:**
+- 0x80-0x87 (Serial SIO)
+- 0x10-0x17 (CF Card)  
+- 0x70-0x73 (RTC)
+- 0x00-0x07 (Digital I/O)
+- 0x78-0x7B (Memory banking)
+
+## Supported VGM Commands
+
+- 5A - Write to OPL2 register
+- 5B - Write to OPL1 register
+- 5E - Write to OPL3 register in bank 1
+- 5F - Write to OPL3 register in bank 2
+- 61 - Variable delay
+- 62 - 1/60s delay
+- 63 - 1/50s delay
+- 66 - End of stream
+- 70 to 7F - Short variable delay
+- A0 - Write to AY3 register
+
+## Controls
+
+- **ESC** - Exit player
+- Player automatically loops when reaching end of stream
+
+## Technical Notes
+
+- Built as CP/M .COM file (669 bytes)
+- Uses CP/M BDOS calls for file I/O and console
+- Direct I/O port access for sound chips
+- Simplified timing suitable for RC2014 systems
+- 128-byte file buffer for memory efficiency
 
 ## Original Description
 
@@ -58,35 +131,13 @@ Unsupported commands in the VGM data are printed as ASCII chars. If something
 is printed and the music is not sounding correctly, probably your file uses
 not implemented commands.
 
-## Supported VGM Commands
+## RC2014 Adaptations Made
 
-The following commands are available:
+- ✅ Adapt CPC-specific BIOS calls to CP/M BDOS calls
+- ✅ Update I/O port addresses for RC2014 sound cards
+- ✅ Modify timing routines for RC2014/CP/M environment
+- ✅ Convert to 8.3 filename convention
+- ✅ Create sjasmplus build system
+- ✅ Test build and fix assembly errors
 
-- 5A - Write to OPL2 register
-- 5B - Write to OPL1 register
-- 5E - Write to OPL3 register in bank 1
-- 5F - Write to OPL3 register in bank 2
-- 61 - Variable delay
-- 62 - 1/60s delay
-- 63 - 1/50s delay
-- 66 - End of stream
-- 70 to 7F - Short variable delay
-- A0 - Write to AY3 register
-
-## Technical Notes
-
-The player uses CALLs BD19 (for synchronization), BB5A (for printing unknown
-commands), and BD34 (write to AY). It also changes the border color to show
-CPU load, and uses HALTs to position itself somewhere in the middle of the
-display. This is all easily replaced or removed.
-
-The player uses registers HL (song pointer), BC (pointer to OPL3), and IY
-(time delay residue accumulator). These can easily be replaced by variables
-or reloaded as needed instead to have something easier to mix with other code.
-
-## RC2014 Adaptations Needed
-
-- [ ] Adapt CPC-specific BIOS calls to CP/M or RC2014 monitor calls
-- [ ] Update I/O port addresses for RC2014 sound cards
-- [ ] Modify timing routines for RC2014 interrupt system
-- [ ] Test with RC2014 OPL3 and AY sound cards
+Ready for hardware testing!

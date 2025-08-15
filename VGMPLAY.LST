@@ -1,4 +1,4 @@
-# file opened: vgmplay-rc2014.z80
+# file opened: VGMPLAY.Z80
   1   0000              ;
   2   0000              ; VGM Player for RC2014 Z80 Computer
   3   0000              ; Port of the original Amstrad CPC VGM Player
@@ -66,7 +66,7 @@
  65   0105 CA 9B 02         jp z,ShowUsage
  66   0108
  67   0108                  ; Set up our own DMA buffer
- 68   0108 11 1D 03         ld de,DMABuffer
+ 68   0108 11 1A 03         ld de,DMABuffer
  69   010B 0E 1A            ld c,BDOS_SETDMA
  70   010D CD 05 00         call BDOS_ENTRY
  71   0110
@@ -79,10 +79,10 @@
  78   0119 C2 B1 02         jp nz,Exit
  79   011C
  80   011C                  ; Check for "Vgm" identifier
- 81   011C 21 1D 03         ld hl,DMABuffer
- 82   011F 22 19 03         ld (BufCur),hl
+ 81   011C 21 1A 03         ld hl,DMABuffer
+ 82   011F 22 16 03         ld (BufCur),hl
  83   0122 01 80 00         ld bc,BufLen
- 84   0125 ED 43 17 03      ld (BufLeft),bc
+ 84   0125 ED 43 14 03      ld (BufLeft),bc
  85   0129
  86   0129 3E 56            ld a,'V'
  87   012B BE               cp (hl)
@@ -98,14 +98,14 @@
  97   013D
  98   013D                  ; Parse VGM header - simplified version
  99   013D                  ; Skip to data start (offset 0x34 in header, but we'll use fixed offset 0x40)
-100   013D 21 5D 03         ld hl,DMABuffer+0x40
-101   0140 22 13 03         ld (MusicStart),hl
-102   0143 22 15 03         ld (MusicLoop),hl     ; For simplicity, loop = start
+100   013D 21 5A 03         ld hl,DMABuffer+0x40
+101   0140 22 10 03         ld (MusicStart),hl
+102   0143 22 12 03         ld (MusicLoop),hl     ; For simplicity, loop = start
 103   0146
 104   0146                  ; Initialize timing
 105   0146 AF               xor a
-106   0147 32 1B 03         ld (TimerLo),a
-107   014A 32 1C 03         ld (TimerHi),a
+106   0147 32 18 03         ld (TimerLo),a
+107   014A 32 19 03         ld (TimerHi),a
 108   014D
 109   014D                  ; Reset sound chips
 110   014D CD 4B 02         call ResetOPL3
@@ -262,25 +262,25 @@
 261   020E
 262   020E              RestartLoop:
 263   020E                  ; Reset to beginning (simplified)
-264   020E 2A 15 03         ld hl,(MusicLoop)
-265   0211 22 19 03         ld (BufCur),hl
+264   020E 2A 12 03         ld hl,(MusicLoop)
+265   0211 22 16 03         ld (BufCur),hl
 266   0214 01 80 00         ld bc,BufLen
-267   0217 ED 43 17 03      ld (BufLeft),bc
+267   0217 ED 43 14 03      ld (BufLeft),bc
 268   021B C3 53 01         jp MainLoop
 269   021E
 270   021E              ; Get next byte from buffer
 271   021E              GetByte:
-272   021E ED 4B 17 03      ld bc,(BufLeft)
+272   021E ED 4B 14 03      ld bc,(BufLeft)
 273   0222 78               ld a,b
 274   0223 B1               or c
 275   0224 28 0F            jr z,GetNewBuffer
 276   0226
-277   0226 2A 19 03         ld hl,(BufCur)
+277   0226 2A 16 03         ld hl,(BufCur)
 278   0229 7E               ld a,(hl)
 279   022A 23               inc hl
-280   022B 22 19 03         ld (BufCur),hl
+280   022B 22 16 03         ld (BufCur),hl
 281   022E 0B               dec bc
-282   022F ED 43 17 03      ld (BufLeft),bc
+282   022F ED 43 14 03      ld (BufLeft),bc
 283   0233
 284   0233 37               scf                 ; Success
 285   0234 C9               ret
@@ -296,9 +296,9 @@
 295   023C                  ; For CP/M, we need to implement proper file I/O
 296   023C                  ; This is simplified - in real implementation should handle EOF properly
 297   023C 01 80 00         ld bc,BufLen
-298   023F ED 43 17 03      ld (BufLeft),bc
-299   0243 21 1D 03         ld hl,DMABuffer
-300   0246 22 19 03         ld (BufCur),hl
+298   023F ED 43 14 03      ld (BufLeft),bc
+299   0243 21 1A 03         ld hl,DMABuffer
+300   0246 22 16 03         ld (BufCur),hl
 301   0249 AF               xor a               ; Return success
 302   024A C9               ret
 303   024B
@@ -377,7 +377,7 @@
 376   02A3 C3 B1 02         jp Exit
 377   02A6
 378   02A6              BadFile:
-379   02A6 11 F5 02         ld de,BadFileMsg
+379   02A6 11 F2 02         ld de,BadFileMsg
 380   02A9 0E 09            ld c,BDOS_PSTRING
 381   02AB CD 05 00         call BDOS_ENTRY
 382   02AE C3 B1 02         jp Exit
@@ -403,35 +403,34 @@
 399   02CC 6F 72 20 52
 399   02D0 43 32 30 31
 399   02D4 34 0D 0A
-400   02D7 55 73 61 67      db 'Usage: VGMPLAY filename.vgm',13,10
+400   02D7 55 73 61 67      db 'Usage: VGMPLAY MUSIC.VGM',13,10
 400   02DB 65 3A 20 56
 400   02DF 47 4D 50 4C
-400   02E3 41 59 20 66
-400   02E7 69 6C 65 6E
-400   02EB 61 6D 65 2E
-400   02EF 76 67 6D 0D
-400   02F3 0A
-401   02F4 24               db '$'
-402   02F5
-403   02F5              BadFileMsg:
-404   02F5 45 72 72 6F      db 'Error: Not a valid VGM file',13,10,'$'
-404   02F9 72 3A 20 4E
-404   02FD 6F 74 20 61
-404   0301 20 76 61 6C
-404   0305 69 64 20 56
-404   0309 47 4D 20 66
-404   030D 69 6C 65 0D
-404   0311 0A 24
-405   0313
-406   0313              ; Variables
-407   0313 00 00        MusicStart:     dw 0
-408   0315 00 00        MusicLoop:      dw 0
-409   0317 00 00        BufLeft:        dw 0
-410   0319 00 00        BufCur:         dw 0
-411   031B 00           TimerLo:        db 0
-412   031C 00           TimerHi:        db 0
-413   031D
-414   031D              ; DMA buffer for file I/O
-415   031D 00 00 00...  DMABuffer:      ds BufLen
-416   039D
-# file closed: vgmplay-rc2014.z80
+400   02E3 41 59 20 4D
+400   02E7 55 53 49 43
+400   02EB 2E 56 47 4D
+400   02EF 0D 0A
+401   02F1 24               db '$'
+402   02F2
+403   02F2              BadFileMsg:
+404   02F2 45 72 72 6F      db 'Error: Not a valid VGM file',13,10,'$'
+404   02F6 72 3A 20 4E
+404   02FA 6F 74 20 61
+404   02FE 20 76 61 6C
+404   0302 69 64 20 56
+404   0306 47 4D 20 66
+404   030A 69 6C 65 0D
+404   030E 0A 24
+405   0310
+406   0310              ; Variables
+407   0310 00 00        MusicStart:     dw 0
+408   0312 00 00        MusicLoop:      dw 0
+409   0314 00 00        BufLeft:        dw 0
+410   0316 00 00        BufCur:         dw 0
+411   0318 00           TimerLo:        db 0
+412   0319 00           TimerHi:        db 0
+413   031A
+414   031A              ; DMA buffer for file I/O
+415   031A 00 00 00...  DMABuffer:      ds BufLen
+416   039A
+# file closed: VGMPLAY.Z80
